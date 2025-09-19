@@ -15,14 +15,24 @@ It can be easily integrated into other Python projects using the included Python
 - Parallel public key generation
 - Python bindings
 
-## Usage
+## Installation
 
-To use cuECC, follow these steps:
-
+### Quick Start (macOS)
 1. Clone this repository.
 1. Navigate to the cloned directory.
 1. Run `make all` to build the library.
 1. Use the built `libcuecc.so` in your code.
+
+### Ubuntu/Linux Setup
+For Ubuntu users, see [UBUNTU_SETUP.md](UBUNTU_SETUP.md) for detailed installation instructions including OpenCL setup for different GPU vendors.
+
+### Check OpenCL Availability
+```bash
+# Check if OpenCL is properly configured
+make check-opencl
+```
+
+## Usage
 
 To use cuECC in Python, follow these steps:
 
