@@ -1,5 +1,4 @@
 import csv
-import itertools
 import random
 from typing import TextIO, List, Tuple, Any
 import os
@@ -9,7 +8,7 @@ import click
 from benchmark.adapter import adapt_get_public_key_by_private_key
 from benchmark.reference.ecc import Ecc as ReferenceEcc
 from benchmark.settings import LIBCUECC_SO_PATH, LIBCUECC_OPENCL_SO_PATH, LIBCUECC_METAL_SO_PATH
-from benchmark.utils import primes as prime_generator
+from benchmark.utils import fast_primes
 from bindings.ecc import Ecc as CuEcc
 from bindings.ecc_opencl import EccOpenCL
 from bindings.ecc_metal import EccMetal
@@ -68,25 +67,26 @@ def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: 
     # Load GPU implementations based on backend selection
     gpu_implementations = load_gpu_implementation(gpu_backend)
 
-    # Always include Python reference implementation unless explicitly excluded
+    # Start with GPU implementations
     implementations_to_test = gpu_implementations.copy()
 
-    # Add Python reference implementation
-    reference_ecc = ReferenceEcc()
-    implementations_to_test.append(("Python", reference_ecc))
-    print("✓ Python reference implementation loaded")
+    # Add Python reference implementation for 'cpu' or 'all' backends
+    if gpu_backend in ["cpu", "all"]:
+        reference_ecc = ReferenceEcc()
+        implementations_to_test.append(("Python", reference_ecc))
+        print("✓ Python reference implementation loaded")
 
-    if not gpu_implementations and gpu_backend != "none":
+    if not gpu_implementations and gpu_backend != "cpu":
         print(f"Warning: No GPU implementations available for backend '{gpu_backend}'")
         print("Falling back to Python-only benchmark")
 
-    if gpu_backend == "none":
+    if gpu_backend == "cpu":
         print("[*] GPU backend disabled - running CPU-only benchmark")
 
     print(f"[*] Testing {len(implementations_to_test)} implementation(s): {[name for name, _ in implementations_to_test]}")
 
     print("- Generating primes...")
-    primes = list(itertools.islice(prime_generator(), 2**18))
+    primes = fast_primes(1000000)  # Generate primes up to 1M - sufficient for randomness
 
     runnables = [
         (name, adapt_get_public_key_by_private_key(ecc))
@@ -96,7 +96,7 @@ def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: 
     for n in range(start_from, end_at + 1):
         print(f"- For 2**n where n = {n}...")
 
-        private_keys = [random.choice(primes) for _ in range(2**n)]
+        private_keys = random.choices(primes, k=2**n)
 
         results = [(name, *runnable(private_keys)) for name, runnable in runnables]
 
@@ -126,9 +126,9 @@ def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: 
 @click.option("--end-at", required=False, default=30, help="Ending power of 2 for batch size (default: 30)")
 @click.option(
     "--gpu-backend",
-    type=click.Choice(["cuda", "opencl", "metal", "both", "all", "none"], case_sensitive=False),
+    type=click.Choice(["cuda", "opencl", "metal", "both", "all", "cpu"], case_sensitive=False),
     default="both",
-    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), metal (macOS only), both (CUDA+OpenCL), all (test all available), none (CPU only)"
+    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), metal (macOS only), both (CUDA+OpenCL), all (test all available), cpu (CPU only)"
 )
 def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str):
     from uuid import uuid4
