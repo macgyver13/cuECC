@@ -116,7 +116,7 @@ int initOpenCL(OpenCLContext* ctx) {
     }
 
     // Create a command queue
-    ctx->queue = clCreateCommandQueue(ctx->context, ctx->device, 0, &ret);
+    ctx->queue = clCreateCommandQueueWithProperties(ctx->context, ctx->device, NULL, &ret);
     if (ret != CL_SUCCESS) {
         printf("Error: Failed to create command queue: %s\n", getOpenCLErrorString(ret));
         return -1;
