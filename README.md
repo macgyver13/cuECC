@@ -36,9 +36,49 @@ To compare the performance of cuECC with a pure-python implementation, follow th
 
 1. Clone this repository.
 1. Navigate to the cloned directory.
-1. Run `make all` to build the library.
+1. Run `make all` to build both CUDA and OpenCL libraries.
 1. Run `poetry install` to install the dependencies.
 1. Run `poetry run benchmark-public-key` to benchmark the public key generation process.
+
+### Benchmark Options
+
+The benchmark now supports selective GPU backend testing:
+
+```bash
+# Compare all available implementations (default)
+poetry run benchmark-public-key --gpu-backend both
+
+# Test only CUDA vs Python (NVIDIA GPUs)
+poetry run benchmark-public-key --gpu-backend cuda
+
+# Test only OpenCL vs Python (cross-platform GPUs)
+poetry run benchmark-public-key --gpu-backend opencl
+
+# Test only Python (CPU-only)
+poetry run benchmark-public-key --gpu-backend none
+
+# Custom batch size range
+poetry run benchmark-public-key --start-from 5 --end-at 20
+
+# All options combined
+poetry run benchmark-public-key --gpu-backend opencl --start-from 1 --end-at 10 --attempt-key mytest
+```
+
+### Build Options
+
+```bash
+# Build both CUDA and OpenCL libraries
+make all
+
+# Build only CUDA library (NVIDIA GPUs)
+make cuda
+
+# Build only OpenCL library (cross-platform GPUs)
+make opencl
+
+# Clean build directory
+make clean
+```
 
 Note that the Python implementation is from [`cryptography-python`](https://github.com/mohanson/cryptography-python/blob/master/secp256k1.py).
 
