@@ -136,7 +136,9 @@ int initOpenCL(OpenCLContext* ctx) {
         return -1;
     }
 
-    ret = clBuildProgram(ctx->program, 1, &ctx->device, NULL, NULL, NULL);
+    // Build options to avoid problematic system headers
+    const char* build_options = "-cl-std=CL1.2 -w -Werror -I.";
+    ret = clBuildProgram(ctx->program, 1, &ctx->device, build_options, NULL, NULL);
     if (ret != CL_SUCCESS) {
         printf("Error: Failed to build program: %s\n", getOpenCLErrorString(ret));
 

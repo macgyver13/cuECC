@@ -8,17 +8,18 @@ import click
 
 from benchmark.adapter import adapt_get_public_key_by_private_key
 from benchmark.reference.ecc import Ecc as ReferenceEcc
-from benchmark.settings import LIBCUECC_SO_PATH, LIBCUECC_OPENCL_SO_PATH
+from benchmark.settings import LIBCUECC_SO_PATH, LIBCUECC_OPENCL_SO_PATH, LIBCUECC_METAL_SO_PATH
 from benchmark.utils import primes as prime_generator
 from bindings.ecc import Ecc as CuEcc
 from bindings.ecc_opencl import EccOpenCL
+from bindings.ecc_metal import EccMetal
 
 
 def load_gpu_implementation(gpu_backend: str) -> List[Tuple[str, Any]]:
     """Load GPU implementations based on the selected backend."""
     implementations = []
 
-    if gpu_backend in ["cuda", "both"]:
+    if gpu_backend in ["cuda", "both", "all"]:
         try:
             if not os.path.exists(LIBCUECC_SO_PATH):
                 print(f"Warning: CUDA library not found at {LIBCUECC_SO_PATH}")
@@ -30,7 +31,7 @@ def load_gpu_implementation(gpu_backend: str) -> List[Tuple[str, Any]]:
         except Exception as e:
             print(f"Warning: Failed to load CUDA implementation: {e}")
 
-    if gpu_backend in ["opencl", "both"]:
+    if gpu_backend in ["opencl", "both", "all"]:
         try:
             if not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
                 print(f"Warning: OpenCL library not found at {LIBCUECC_OPENCL_SO_PATH}")
@@ -41,6 +42,18 @@ def load_gpu_implementation(gpu_backend: str) -> List[Tuple[str, Any]]:
                 print("✓ OpenCL implementation loaded")
         except Exception as e:
             print(f"Warning: Failed to load OpenCL implementation: {e}")
+
+    if gpu_backend in ["metal", "both", "all"]:
+        try:
+            if not os.path.exists(LIBCUECC_METAL_SO_PATH):
+                print(f"Warning: Metal library not found at {LIBCUECC_METAL_SO_PATH}")
+                print("Run 'make metal' to build the Metal library")
+            else:
+                metal_ecc = EccMetal(LIBCUECC_METAL_SO_PATH)
+                implementations.append(("Metal", metal_ecc))
+                print("✓ Metal implementation loaded")
+        except Exception as e:
+            print(f"Warning: Failed to load Metal implementation: {e}")
 
     return implementations
 
@@ -113,9 +126,9 @@ def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: 
 @click.option("--end-at", required=False, default=30, help="Ending power of 2 for batch size (default: 30)")
 @click.option(
     "--gpu-backend",
-    type=click.Choice(["cuda", "opencl", "both", "none"], case_sensitive=False),
+    type=click.Choice(["cuda", "opencl", "metal", "both", "all", "none"], case_sensitive=False),
     default="both",
-    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), both (compare both), none (CPU only)"
+    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), metal (macOS only), both (CUDA+OpenCL), all (test all available), none (CPU only)"
 )
 def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str):
     from uuid import uuid4
@@ -138,15 +151,22 @@ def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str
         print("Please run 'make opencl' to build the OpenCL library")
         return
 
-    if gpu_backend == "both":
+    if gpu_backend == "metal" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
+        print(f"Error: Metal library not found at {LIBCUECC_METAL_SO_PATH}")
+        print("Please run 'make metal' to build the Metal library")
+        return
+
+    if gpu_backend in ["both", "all"]:
         missing_libs = []
         if not os.path.exists(LIBCUECC_SO_PATH):
             missing_libs.append("CUDA (run 'make cuda')")
         if not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
             missing_libs.append("OpenCL (run 'make opencl')")
+        if gpu_backend == "all" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
+            missing_libs.append("Metal (run 'make metal')")
 
         if missing_libs:
-            print(f"Warning: Missing libraries for 'both' mode: {', '.join(missing_libs)}")
+            print(f"Warning: Missing libraries for '{gpu_backend}' mode: {', '.join(missing_libs)}")
             print("Benchmark will proceed with available implementations")
 
     with open(BUILD_DIR / f"report-public-keys-{attempt_key}.csv", "w") as out:
