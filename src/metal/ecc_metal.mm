@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+// Type aliases for compatibility
+typedef uint32_t u32;
+typedef uint64_t u64;
 
 static MetalContext g_ctx = {0};
 static int g_initialized = 0;
@@ -44,11 +49,11 @@ int initMetal(MetalContext* ctx) {
         // Load the Metal shader library
         NSError* error = nil;
 
-        // Try multiple possible paths for the shader file
+        // Use the corrected scalar multiplication shader file
         NSArray* possiblePaths = @[
-            @"src/metal/secp256k1_pubkey.metal",
-            @"../src/metal/secp256k1_pubkey.metal",
-            [NSString stringWithFormat:@"%s/src/metal/secp256k1_pubkey.metal", getenv("PWD") ?: "."]
+            @"src/metal/secp256k1_correct.metal",
+            @"../src/metal/secp256k1_correct.metal",
+            [NSString stringWithFormat:@"%s/src/metal/secp256k1_correct.metal", getenv("PWD") ?: "."]
         ];
 
         NSString* shaderSource = nil;
@@ -124,7 +129,7 @@ void cleanupMetal(MetalContext* ctx) {
     }
 }
 
-void getPublicKeyByPrivateKeyMetal(ECCPoint output[], u64 flattenedPrivateKeys[][4], int n) {
+void getPublicKeyByPrivateKeyMetal(ECCPoint output[], BigInt flattenedPrivateKeys[], int n) {
     @autoreleasepool {
         // Initialize Metal if not already done
         if (!g_initialized) {
@@ -140,7 +145,7 @@ void getPublicKeyByPrivateKeyMetal(ECCPoint output[], u64 flattenedPrivateKeys[]
         id<MTLComputePipelineState> computePipeline = (__bridge id<MTLComputePipelineState>)g_ctx.compute_pipeline;
 
         // Create Metal buffers
-        NSUInteger inputSize = sizeof(u64) * 4 * n;
+        NSUInteger inputSize = sizeof(BigInt) * n;
         NSUInteger outputSize = sizeof(ECCPoint) * n;
 
         id<MTLBuffer> inputBuffer = [device newBufferWithBytes:flattenedPrivateKeys
@@ -205,5 +210,97 @@ void getPublicKeyByPrivateKeyMetal(ECCPoint output[], u64 flattenedPrivateKeys[]
         memcpy(output, [outputBuffer contents], outputSize);
 
         printf("Metal computation completed successfully for %d keys\n", n);
+    }
+}
+
+// BigInt primitive operations for testing (Step 1)
+// These are CPU implementations that call the same algorithms as the Metal shaders
+
+// CPU implementations of BigInt operations that match the Metal algorithms
+// These provide validation references and can be used for testing
+
+u32 bigintAdd(BigInt* result, const BigInt* a, const BigInt* b) {
+    u32 carry = 0;
+    for (int i = 0; i < 8; i++) {
+        u64 sum = (u64)a->limbs[i] + b->limbs[i] + carry;
+        result->limbs[i] = (u32)sum;
+        carry = (u32)(sum >> 32);
+    }
+    return carry;
+}
+
+u32 bigintSub(BigInt* result, const BigInt* a, const BigInt* b) {
+    u32 borrow = 0;
+    for (int i = 0; i < 8; i++) {
+        u64 diff = (u64)a->limbs[i] - b->limbs[i] - borrow;
+        result->limbs[i] = (u32)diff;
+        borrow = (diff >> 32) & 1;
+    }
+    return borrow;
+}
+
+int bigintEq(const BigInt* a, const BigInt* b) {
+    for (int i = 0; i < 8; i++) {
+        if (a->limbs[i] != b->limbs[i]) return 0;
+    }
+    return 1;
+}
+
+int bigintLt(const BigInt* a, const BigInt* b) {
+    for (int i = 7; i >= 0; i--) {
+        if (a->limbs[i] < b->limbs[i]) return 1;
+        if (a->limbs[i] > b->limbs[i]) return 0;
+    }
+    return 0; // Equal case
+}
+
+int bigintGte(const BigInt* a, const BigInt* b) {
+    for (int i = 7; i >= 0; i--) {
+        if (a->limbs[i] > b->limbs[i]) return 1;
+        if (a->limbs[i] < b->limbs[i]) return 0;
+    }
+    return 1; // Equal case
+}
+
+int bigintTestBit(const BigInt* a, u32 bit_index) {
+    if (bit_index >= 256) return 0;
+    u32 limb_index = bit_index / 32;
+    u32 bit_in_limb = bit_index % 32;
+    return (a->limbs[limb_index] & (1u << bit_in_limb)) != 0;
+}
+
+void bigintShl(BigInt* result, const BigInt* a, u32 n) {
+    if (n == 0) {
+        memcpy(result, a, sizeof(BigInt));
+        return;
+    }
+    if (n >= 32) {
+        memset(result, 0, sizeof(BigInt));
+        return;
+    }
+
+    u32 carry = 0;
+    for (int i = 0; i < 8; i++) {
+        u32 new_carry = a->limbs[i] >> (32 - n);
+        result->limbs[i] = (a->limbs[i] << n) | carry;
+        carry = new_carry;
+    }
+}
+
+void bigintShr(BigInt* result, const BigInt* a, u32 n) {
+    if (n == 0) {
+        memcpy(result, a, sizeof(BigInt));
+        return;
+    }
+    if (n >= 32) {
+        memset(result, 0, sizeof(BigInt));
+        return;
+    }
+
+    u32 carry = 0;
+    for (int i = 7; i >= 0; i--) {
+        u32 new_carry = a->limbs[i] << (32 - n);
+        result->limbs[i] = (a->limbs[i] >> n) | carry;
+        carry = new_carry;
     }
 }

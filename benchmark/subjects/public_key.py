@@ -9,7 +9,7 @@ from benchmark.adapter import adapt_get_public_key_by_private_key
 from benchmark.reference.ecc import Ecc as ReferenceEcc
 from benchmark.reference.ecc_optimized import EccOptimized
 from benchmark.settings import LIBCUECC_SO_PATH, LIBCUECC_OPENCL_SO_PATH, LIBCUECC_METAL_SO_PATH
-from benchmark.utils import fast_primes
+from benchmark.utils import fast_primes, generate_crypto_primes, generate_range_primes
 from bindings.ecc import Ecc as CuEcc
 from bindings.ecc_opencl import EccOpenCL
 from bindings.ecc_metal import EccMetal
@@ -58,10 +58,11 @@ def load_gpu_implementation(gpu_backend: str) -> List[Tuple[str, Any]]:
     return implementations
 
 
-def report(out: TextIO, gpu_backend: str = "both", cpu_backend: str = "none", start_from: int = 1, end_at: int = 30):
+def report(out: TextIO, gpu_backend: str = "both", cpu_backend: str = "none", start_from: int = 1, end_at: int = 30, prime_strategy: str = "small"):
     print("[*] Benchmark: get_public_key_from_private_key")
     print(f"[*] GPU Backend: {gpu_backend}")
     print(f"[*] CPU Backend: {cpu_backend}")
+    print(f"[*] Prime Strategy: {prime_strategy}")
 
     writer = csv.DictWriter(out, fieldnames=["n", "name", "elapsed_time", "is_same"])
     writer.writeheader()
@@ -103,8 +104,22 @@ def report(out: TextIO, gpu_backend: str = "both", cpu_backend: str = "none", st
 
     print(f"[*] Testing {len(implementations_to_test)} implementation(s): {[name for name, _ in implementations_to_test]}")
 
-    print("- Generating primes...")
-    primes = fast_primes(1000000)  # Generate primes up to 1M - sufficient for randomness
+    print(f"- Generating primes using '{prime_strategy}' strategy...")
+
+    if prime_strategy == "small":
+        primes = fast_primes(1000000)  # Generate primes up to 1M - sufficient for randomness
+    elif prime_strategy == "crypto":
+        # Pre-generate some 256-bit cryptographic primes for reuse
+        max_needed = 2**end_at
+        primes = generate_crypto_primes(min(max_needed, 10000), bits=256)
+        print(f"  Generated {len(primes)} cryptographic primes (256-bit)")
+    elif prime_strategy == "large":
+        # Generate large primes in a reasonable range
+        max_needed = 2**end_at
+        primes = generate_range_primes(min(max_needed, 10000), min_val=2**31, max_val=2**32)
+        print(f"  Generated {len(primes)} large primes (32-bit range)")
+    else:
+        raise ValueError(f"Unknown prime strategy: {prime_strategy}")
 
     runnables = [
         (name, adapt_get_public_key_by_private_key(ecc))
@@ -154,7 +169,13 @@ def report(out: TextIO, gpu_backend: str = "both", cpu_backend: str = "none", st
     default="optimized",
     help="CPU backend to use: optimized (coincurve/libsecp256k1), reference (pure Python), both (test both CPU implementations), none (no CPU)"
 )
-def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str, cpu_backend: str):
+@click.option(
+    "--prime-strategy",
+    type=click.Choice(["small", "crypto", "large"], case_sensitive=False),
+    default="small",
+    help="Prime generation strategy: small (sieve up to 1M), crypto (256-bit cryptographic primes), large (large range primes)"
+)
+def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str, cpu_backend: str, prime_strategy: str):
     from uuid import uuid4
 
     from benchmark.settings import BUILD_DIR
@@ -209,7 +230,7 @@ def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str
         return
 
     with open(BUILD_DIR / f"report-public-keys-{attempt_key}.csv", "w") as out:
-        report(out, gpu_backend, cpu_backend, start_from, end_at)
+        report(out, gpu_backend, cpu_backend, start_from, end_at, prime_strategy)
 
 
 if __name__ == "__main__":

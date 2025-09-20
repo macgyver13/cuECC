@@ -43,6 +43,11 @@ poetry run benchmark-public-key --gpu-backend none --cpu-backend both
 poetry run benchmark-public-key --gpu-backend metal --start-from 12 --end-at 16
 ```
 
+**Cryptographic primes** (256-bit for realistic crypto testing):
+```bash
+poetry run benchmark-public-key --gpu-backend metal --prime-strategy crypto
+```
+
 ## Options
 
 ### GPU Backends
@@ -58,6 +63,11 @@ poetry run benchmark-public-key --gpu-backend metal --start-from 12 --end-at 16
 - `reference` - Pure Python implementation
 - `both` - Test both CPU implementations
 - `none` - Disable CPU testing
+
+### Prime Generation
+- `small` - Fast sieve up to 1M (default, good for testing)
+- `crypto` - 256-bit cryptographic primes (realistic crypto use)
+- `large` - Large primes in 32-bit range (middle ground)
 
 ### Range Control
 - `--start-from N` - Start from 2^N batch size (default: 1)

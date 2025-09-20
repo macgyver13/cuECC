@@ -19,6 +19,7 @@ benchmark-public-key = "benchmark.subjects.public_key:main"
 python = "^3.12"
 click = "^8.1.7"
 coincurve = "^21.0.0"
+sympy = "^1.14.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.7.0"

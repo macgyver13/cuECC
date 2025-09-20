@@ -5,11 +5,10 @@ from typing import List
 
 from bindings.hooks import use_get_public_key_by_private_key
 from bindings.utils import (
-    CtypePoint,
-    CtypeUint256,
+    CtypeBigInt,
     Point,
-    as_ctype_uint256,
-    as_python_int,
+    as_ctype_bigint,
+    bigint_as_python_int,
 )
 
 
@@ -18,18 +17,18 @@ class EccMetal:
         self._library_path = library_path
         self._library = ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
 
-        # Define ECCPoint structure for Metal (same as Point but named differently)
+        # Define ECCPoint structure for Metal using BigInt (32-bit limbs)
         class CtypeECCPoint(ctypes.Structure):
             _fields_ = [
-                ("x", CtypeUint256),
-                ("y", CtypeUint256),
+                ("x", CtypeBigInt),
+                ("y", CtypeBigInt),
             ]
 
         # Load the Metal-specific function
         self._get_public_key_by_private_key_metal = self._library.getPublicKeyByPrivateKeyMetal
         self._get_public_key_by_private_key_metal.argtypes = [
             ctypes.POINTER(CtypeECCPoint),
-            ctypes.POINTER(CtypeUint256),
+            ctypes.POINTER(CtypeBigInt),
             ctypes.c_int,
         ]
         self._get_public_key_by_private_key_metal.restype = None
@@ -47,7 +46,7 @@ class EccMetal:
 
         args = (
             (self._CtypeECCPoint * n)(),
-            (CtypeUint256 * (n * 4))(*[as_ctype_uint256(key) for key in private_keys]),
+            (CtypeBigInt * n)(*[as_ctype_bigint(key) for key in private_keys]),
             n,
         )
 
@@ -55,7 +54,7 @@ class EccMetal:
             self._get_public_key_by_private_key_metal(*args)
 
         points = [
-            Point(x=as_python_int(point.x), y=as_python_int(point.y))
+            Point(x=bigint_as_python_int(point.x), y=bigint_as_python_int(point.y))
             for point in args[0]
         ]
 
