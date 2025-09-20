@@ -7,6 +7,7 @@ import click
 
 from benchmark.adapter import adapt_get_public_key_by_private_key
 from benchmark.reference.ecc import Ecc as ReferenceEcc
+from benchmark.reference.ecc_optimized import EccOptimized
 from benchmark.settings import LIBCUECC_SO_PATH, LIBCUECC_OPENCL_SO_PATH, LIBCUECC_METAL_SO_PATH
 from benchmark.utils import fast_primes
 from bindings.ecc import Ecc as CuEcc
@@ -57,31 +58,48 @@ def load_gpu_implementation(gpu_backend: str) -> List[Tuple[str, Any]]:
     return implementations
 
 
-def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: int = 30):
+def report(out: TextIO, gpu_backend: str = "both", cpu_backend: str = "none", start_from: int = 1, end_at: int = 30):
     print("[*] Benchmark: get_public_key_from_private_key")
     print(f"[*] GPU Backend: {gpu_backend}")
+    print(f"[*] CPU Backend: {cpu_backend}")
 
     writer = csv.DictWriter(out, fieldnames=["n", "name", "elapsed_time", "is_same"])
     writer.writeheader()
 
     # Load GPU implementations based on backend selection
-    gpu_implementations = load_gpu_implementation(gpu_backend)
+    gpu_implementations = []
+    if gpu_backend != "none":
+        gpu_implementations = load_gpu_implementation(gpu_backend)
 
     # Start with GPU implementations
     implementations_to_test = gpu_implementations.copy()
 
-    # Add Python reference implementation for 'cpu' or 'all' backends
-    if gpu_backend in ["cpu", "all"]:
+    # Add CPU implementations based on cpu_backend selection
+    if cpu_backend in ["optimized", "both"]:
+        try:
+            optimized_ecc = EccOptimized()
+            implementations_to_test.append(("CPU-Optimized", optimized_ecc))
+            print("✓ CPU-Optimized implementation loaded (coincurve/libsecp256k1)")
+        except ImportError:
+            print("Warning: coincurve not available, skipping optimized CPU implementation")
+
+    if cpu_backend in ["reference", "both"]:
         reference_ecc = ReferenceEcc()
-        implementations_to_test.append(("Python", reference_ecc))
-        print("✓ Python reference implementation loaded")
+        implementations_to_test.append(("CPU-Reference", reference_ecc))
+        print("✓ CPU-Reference implementation loaded (pure Python)")
 
-    if not gpu_implementations and gpu_backend != "cpu":
+    # Warnings for missing implementations
+    if not gpu_implementations and gpu_backend != "none":
         print(f"Warning: No GPU implementations available for backend '{gpu_backend}'")
-        print("Falling back to Python-only benchmark")
 
-    if gpu_backend == "cpu":
-        print("[*] GPU backend disabled - running CPU-only benchmark")
+    if not implementations_to_test:
+        print("Error: No implementations selected. Use --gpu-backend and/or --cpu-backend to select implementations.")
+        return
+
+    if gpu_backend == "none":
+        print("[*] GPU backend disabled")
+    if cpu_backend == "none":
+        print("[*] CPU backend disabled")
 
     print(f"[*] Testing {len(implementations_to_test)} implementation(s): {[name for name, _ in implementations_to_test]}")
 
@@ -126,11 +144,17 @@ def report(out: TextIO, gpu_backend: str = "both", start_from: int = 1, end_at: 
 @click.option("--end-at", required=False, default=30, help="Ending power of 2 for batch size (default: 30)")
 @click.option(
     "--gpu-backend",
-    type=click.Choice(["cuda", "opencl", "metal", "both", "all", "cpu"], case_sensitive=False),
+    type=click.Choice(["cuda", "opencl", "metal", "both", "all", "none"], case_sensitive=False),
     default="both",
-    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), metal (macOS only), both (CUDA+OpenCL), all (test all available), cpu (CPU only)"
+    help="GPU backend to use: cuda (NVIDIA only), opencl (cross-platform), metal (macOS only), both (CUDA+OpenCL), all (test all GPU backends), none (no GPU)"
 )
-def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str):
+@click.option(
+    "--cpu-backend",
+    type=click.Choice(["optimized", "reference", "both", "none"], case_sensitive=False),
+    default="optimized",
+    help="CPU backend to use: optimized (coincurve/libsecp256k1), reference (pure Python), both (test both CPU implementations), none (no CPU)"
+)
+def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str, cpu_backend: str):
     from uuid import uuid4
 
     from benchmark.settings import BUILD_DIR
@@ -140,37 +164,52 @@ def main(attempt_key: str | None, start_from: int, end_at: int, gpu_backend: str
 
     print("[*] Attempt key:", attempt_key)
 
-    # Validate that we can run the requested backend
-    if gpu_backend == "cuda" and not os.path.exists(LIBCUECC_SO_PATH):
-        print(f"Error: CUDA library not found at {LIBCUECC_SO_PATH}")
-        print("Please run 'make cuda' to build the CUDA library")
+    # Validate GPU backend requirements
+    if gpu_backend != "none":
+        if gpu_backend == "cuda" and not os.path.exists(LIBCUECC_SO_PATH):
+            print(f"Error: CUDA library not found at {LIBCUECC_SO_PATH}")
+            print("Please run 'make cuda' to build the CUDA library")
+            return
+
+        if gpu_backend == "opencl" and not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
+            print(f"Error: OpenCL library not found at {LIBCUECC_OPENCL_SO_PATH}")
+            print("Please run 'make opencl' to build the OpenCL library")
+            return
+
+        if gpu_backend == "metal" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
+            print(f"Error: Metal library not found at {LIBCUECC_METAL_SO_PATH}")
+            print("Please run 'make metal' to build the Metal library")
+            return
+
+        if gpu_backend in ["both", "all"]:
+            missing_libs = []
+            if not os.path.exists(LIBCUECC_SO_PATH):
+                missing_libs.append("CUDA (run 'make cuda')")
+            if not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
+                missing_libs.append("OpenCL (run 'make opencl')")
+            if gpu_backend == "all" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
+                missing_libs.append("Metal (run 'make metal')")
+
+            if missing_libs:
+                print(f"Warning: Missing libraries for '{gpu_backend}' mode: {', '.join(missing_libs)}")
+                print("Benchmark will proceed with available implementations")
+
+    # Validate CPU backend requirements
+    if cpu_backend in ["optimized", "both"]:
+        try:
+            import coincurve  # noqa: F401
+        except ImportError:
+            print("Error: coincurve library not found. Install with: pip install coincurve")
+            if cpu_backend == "optimized":
+                return
+
+    # Ensure at least one backend is selected
+    if gpu_backend == "none" and cpu_backend == "none":
+        print("Error: At least one backend must be selected. Use --gpu-backend and/or --cpu-backend.")
         return
-
-    if gpu_backend == "opencl" and not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
-        print(f"Error: OpenCL library not found at {LIBCUECC_OPENCL_SO_PATH}")
-        print("Please run 'make opencl' to build the OpenCL library")
-        return
-
-    if gpu_backend == "metal" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
-        print(f"Error: Metal library not found at {LIBCUECC_METAL_SO_PATH}")
-        print("Please run 'make metal' to build the Metal library")
-        return
-
-    if gpu_backend in ["both", "all"]:
-        missing_libs = []
-        if not os.path.exists(LIBCUECC_SO_PATH):
-            missing_libs.append("CUDA (run 'make cuda')")
-        if not os.path.exists(LIBCUECC_OPENCL_SO_PATH):
-            missing_libs.append("OpenCL (run 'make opencl')")
-        if gpu_backend == "all" and not os.path.exists(LIBCUECC_METAL_SO_PATH):
-            missing_libs.append("Metal (run 'make metal')")
-
-        if missing_libs:
-            print(f"Warning: Missing libraries for '{gpu_backend}' mode: {', '.join(missing_libs)}")
-            print("Benchmark will proceed with available implementations")
 
     with open(BUILD_DIR / f"report-public-keys-{attempt_key}.csv", "w") as out:
-        report(out, gpu_backend, start_from, end_at)
+        report(out, gpu_backend, cpu_backend, start_from, end_at)
 
 
 if __name__ == "__main__":
