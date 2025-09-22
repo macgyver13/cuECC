@@ -6,7 +6,10 @@
 __global__ void getPublicKeyByPrivateKeyKernel(Point *output,
                                                const u64 privateKey[4]);
 
-extern "C" void getPublicKeyByPrivateKey(Point output[], u64 privateKeys[][4],
-                                         int n);
+#ifdef _WIN32
+extern "C" __declspec(dllexport) void getPublicKeyByPrivateKey(Point output[], u64 privateKeys[][4], int n);
+#else
+extern "C" void getPublicKeyByPrivateKey(Point output[], u64 privateKeys[][4], int n);
+#endif
 
 #endif

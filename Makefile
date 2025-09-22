@@ -1,22 +1,22 @@
 # Detect operating system
 ifeq ($(OS),Windows_NT)
     DETECTED_OS := Windows
-    # Handle Windows paths
-    PROJECT_DIR := $(shell cd)
-    BUILD_DIR := $(PROJECT_DIR)\build
-    SRC_DIR := $(PROJECT_DIR)\src
+    # Handle Windows paths - use forward slashes for Make compatibility
+    PROJECT_DIR := $(shell pwd)
+    BUILD_DIR := $(PROJECT_DIR)/build
+    SRC_DIR := $(PROJECT_DIR)/src
 
     # Windows file extensions
     LIB_EXT := .dll
     EXE_EXT := .exe
 
-    # Path separator
-    PATH_SEP := \\
+    # Path separator - use forward slash for Make compatibility
+    PATH_SEP := /
 
     # Commands
-    MKDIR := if not exist
-    RM := del /Q /S
-    RMDIR := rmdir /Q /S
+    MKDIR := mkdir -p
+    RM := rm -rf
+    RMDIR := rm -rf
 else
     DETECTED_OS := $(shell uname -s)
     # Unix-style paths
@@ -39,17 +39,23 @@ endif
 
 # Library targets with OS-specific extensions
 ifeq ($(DETECTED_OS),Windows)
-    LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc$(LIB_EXT)
-    OPENCL_LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc_opencl$(LIB_EXT)
-    METAL_LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc_metal$(LIB_EXT)
+    LIB_TARGET = $(BUILD_DIR)/cuecc$(LIB_EXT)
+    OPENCL_LIB_TARGET = $(BUILD_DIR)/cuecc_opencl$(LIB_EXT)
+    METAL_LIB_TARGET = $(BUILD_DIR)/cuecc_metal$(LIB_EXT)
 else
     LIB_TARGET = $(BUILD_DIR)/libcuecc$(LIB_EXT)
     OPENCL_LIB_TARGET = $(BUILD_DIR)/libcuecc_opencl$(LIB_EXT)
     METAL_LIB_TARGET = $(BUILD_DIR)/libcuecc_metal$(LIB_EXT)
 endif
 
-LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)*.cu
-LIB_DEPENDENCIES = $(SRC_DIR)$(PATH_SEP)**$(PATH_SEP)*.cuh
+# Define source files explicitly to avoid Windows wildcard issues
+ifeq ($(DETECTED_OS),Windows)
+    LIB_SOURCE = $(SRC_DIR)/ecc.cu
+    LIB_DEPENDENCIES = $(SRC_DIR)/ecc.cuh $(wildcard $(SRC_DIR)/curve/*.cuh) $(wildcard $(SRC_DIR)/uint/*.cuh)
+else
+    LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)*.cu
+    LIB_DEPENDENCIES = $(SRC_DIR)$(PATH_SEP)**$(PATH_SEP)*.cuh
+endif
 
 # OpenCL library
 OPENCL_LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)opencl$(PATH_SEP)ecc_opencl.c
@@ -63,7 +69,8 @@ NVCC = nvcc
 
 # Platform-specific NVCC flags
 ifeq ($(DETECTED_OS),Windows)
-    NVCC_FLAGS = -shared -rdc=true -o $(LIB_TARGET)
+    # Use MSVC compiler with NVCC
+    NVCC_FLAGS = -shared -rdc=true -ccbin "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64" -o $(LIB_TARGET)
 else
     NVCC_FLAGS = -Xcompiler -fPIC -shared -rdc=true -o $(LIB_TARGET)
 endif
@@ -206,18 +213,13 @@ endef
 compile_commands.json: Makefile
 	@echo $(COMPILE_COMMANDS) > compile_commands.json
 
-$(LIB_TARGET): $(LIB_SOURCE) $(LIB_DEPENDENCIES)
-ifeq ($(DETECTED_OS),Windows)
-	@$(MKDIR) "$(BUILD_DIR)" 2>NUL || echo Build directory ready
-	$(NVCC) $(NVCC_FLAGS) $(LIB_SOURCE)
-else
+$(LIB_TARGET): $(LIB_SOURCE)
 	@$(MKDIR) $(BUILD_DIR)
 	$(NVCC) $(NVCC_FLAGS) $(LIB_SOURCE)
-endif
 
 $(OPENCL_LIB_TARGET): $(OPENCL_LIB_SOURCE) $(OPENCL_LIB_DEPENDENCIES)
 ifeq ($(DETECTED_OS),Windows)
-	@$(MKDIR) "$(BUILD_DIR)" 2>NUL || echo Build directory ready
+	@$(MKDIR) $(BUILD_DIR)
 	@if "$(OPENCL_AVAILABLE)" == "0" ( \
 		echo Error: OpenCL libraries not found! & \
 		echo. & \
@@ -283,7 +285,11 @@ else
 	@exit 1
 endif
 
-cuda: $(LIB_TARGET)
+cuda:
+	@$(MKDIR) $(BUILD_DIR)
+	$(NVCC) $(NVCC_FLAGS) $(LIB_SOURCE)
+
+cuda-deps: $(LIB_TARGET)
 
 opencl: $(OPENCL_LIB_TARGET)
 
@@ -396,10 +402,17 @@ else
 endif
 
 clean:
-ifeq ($(DETECTED_OS),Windows)
-	@if exist "$(BUILD_DIR)" $(RMDIR) "$(BUILD_DIR)" 2>NUL || echo Clean completed
-else
 	$(RM) $(BUILD_DIR)
-endif
 
-.PHONY: all cuda opencl metal clean check-opencl check-metal
+debug:
+	@echo "DETECTED_OS: $(DETECTED_OS)"
+	@echo "LIB_SOURCE: $(LIB_SOURCE)"
+	@echo "LIB_DEPENDENCIES: $(LIB_DEPENDENCIES)"
+	@echo "LIB_TARGET: $(LIB_TARGET)"
+	@echo "BUILD_DIR: $(BUILD_DIR)"
+	@echo "SRC_DIR: $(SRC_DIR)"
+	@echo "PATH_SEP: $(PATH_SEP)"
+	@echo "OS: $(OS)"
+	@ls -la "$(LIB_SOURCE)" 2>/dev/null || echo "Source file not found at expected path"
+
+.PHONY: all cuda opencl metal clean check-opencl check-metal debug

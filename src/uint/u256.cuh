@@ -34,6 +34,7 @@ __forceinline__ __device__ int u256Extend(u64 output[8], const u64 a[4]) {
   u256Copy(result, a);
 
   u512Copy(output, result);
+  return 0;
 }
 
 __forceinline__ __device__ bool u256GetBit(const u64 a[4], const int index) {
@@ -339,7 +340,8 @@ __forceinline__ __device__ void u256InvModP(u64 output[4], const u64 a[4],
   u64 result[4];
   u64 pMinus2[4] = {0};
 
-  u256Sub(pMinus2, p, (u64[4]){2});
+  u64 two[4] = {2, 0, 0, 0};
+  u256Sub(pMinus2, p, two);
 
   u256PowModP(result, a, pMinus2, p);
 

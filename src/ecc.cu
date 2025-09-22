@@ -3,6 +3,7 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define cudaRunOrAbort(ans)                                                    \
   { cudaAssert((ans), __FILE__, __LINE__); }
@@ -32,7 +33,7 @@ extern "C" void getPublicKeyByPrivateKey(Point output[],
 
   int numberOfStreams = gridDim.x;
 
-  cudaStream_t streams[numberOfStreams];
+  cudaStream_t *streams = (cudaStream_t*)malloc(numberOfStreams * sizeof(cudaStream_t));
 
   Point *pinnedPoints;
   Point *devicePoints;
@@ -83,4 +84,5 @@ extern "C" void getPublicKeyByPrivateKey(Point output[],
   cudaRunOrAbort(cudaFreeHost(pinnedPrivateKeys));
   cudaRunOrAbort(cudaFree(devicePoints));
   cudaRunOrAbort(cudaFree(devicePrivateKeys));
+  free(streams);
 }
