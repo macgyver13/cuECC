@@ -1,4 +1,5 @@
 import ctypes
+import platform
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import List, Protocol
@@ -25,7 +26,14 @@ class EccProtocol(Protocol):
 class Ecc(EccProtocol):
     def __init__(self, library_path: Path) -> None:
         self._library_path = library_path
-        self._library = ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
+
+        # Platform-specific library loading
+        if platform.system() == "Windows":
+            # Windows DLL loading
+            self._library = ctypes.WinDLL(str(library_path))
+        else:
+            # Unix-like systems (Linux, macOS)
+            self._library = ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
 
         self._get_public_key_by_private_key = use_get_public_key_by_private_key(
             self._library

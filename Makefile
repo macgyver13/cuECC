@@ -1,28 +1,108 @@
-PROJECT_DIR = $(realpath .)
+# Detect operating system
+ifeq ($(OS),Windows_NT)
+    DETECTED_OS := Windows
+    # Handle Windows paths
+    PROJECT_DIR := $(shell cd)
+    BUILD_DIR := $(PROJECT_DIR)\build
+    SRC_DIR := $(PROJECT_DIR)\src
 
-BUILD_DIR = $(PROJECT_DIR)/build
-SRC_DIR = $(PROJECT_DIR)/src
+    # Windows file extensions
+    LIB_EXT := .dll
+    EXE_EXT := .exe
 
-# CUDA library
-LIB_TARGET = $(BUILD_DIR)/libcuecc.so
-LIB_SOURCE = $(SRC_DIR)/*.cu
-LIB_DEPENDENCIES = $(SRC_DIR)/**/*.cuh
+    # Path separator
+    PATH_SEP := \\
+
+    # Commands
+    MKDIR := if not exist
+    RM := del /Q /S
+    RMDIR := rmdir /Q /S
+else
+    DETECTED_OS := $(shell uname -s)
+    # Unix-style paths
+    PROJECT_DIR := $(realpath .)
+    BUILD_DIR := $(PROJECT_DIR)/build
+    SRC_DIR := $(PROJECT_DIR)/src
+
+    # Unix file extensions
+    LIB_EXT := .so
+    EXE_EXT :=
+
+    # Path separator
+    PATH_SEP := /
+
+    # Commands
+    MKDIR := mkdir -p
+    RM := rm -rf
+    RMDIR := rm -rf
+endif
+
+# Library targets with OS-specific extensions
+ifeq ($(DETECTED_OS),Windows)
+    LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc$(LIB_EXT)
+    OPENCL_LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc_opencl$(LIB_EXT)
+    METAL_LIB_TARGET = $(BUILD_DIR)$(PATH_SEP)cuecc_metal$(LIB_EXT)
+else
+    LIB_TARGET = $(BUILD_DIR)/libcuecc$(LIB_EXT)
+    OPENCL_LIB_TARGET = $(BUILD_DIR)/libcuecc_opencl$(LIB_EXT)
+    METAL_LIB_TARGET = $(BUILD_DIR)/libcuecc_metal$(LIB_EXT)
+endif
+
+LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)*.cu
+LIB_DEPENDENCIES = $(SRC_DIR)$(PATH_SEP)**$(PATH_SEP)*.cuh
 
 # OpenCL library
-OPENCL_LIB_TARGET = $(BUILD_DIR)/libcuecc_opencl.so
-OPENCL_LIB_SOURCE = $(SRC_DIR)/opencl/ecc_opencl.c
-OPENCL_LIB_DEPENDENCIES = $(SRC_DIR)/opencl/*.h $(SRC_DIR)/opencl/*.cl
+OPENCL_LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)opencl$(PATH_SEP)ecc_opencl.c
+OPENCL_LIB_DEPENDENCIES = $(SRC_DIR)$(PATH_SEP)opencl$(PATH_SEP)*.h $(SRC_DIR)$(PATH_SEP)opencl$(PATH_SEP)*.cl
 
 # Metal library (macOS only)
-METAL_LIB_TARGET = $(BUILD_DIR)/libcuecc_metal.so
-METAL_LIB_SOURCE = $(SRC_DIR)/metal/ecc_metal.mm
-METAL_LIB_DEPENDENCIES = $(SRC_DIR)/metal/*.h $(SRC_DIR)/metal/*.metal
+METAL_LIB_SOURCE = $(SRC_DIR)$(PATH_SEP)metal$(PATH_SEP)ecc_metal.mm
+METAL_LIB_DEPENDENCIES = $(SRC_DIR)$(PATH_SEP)metal$(PATH_SEP)*.h $(SRC_DIR)$(PATH_SEP)metal$(PATH_SEP)*.metal
 
 NVCC = nvcc
-NVCC_FLAGS = -Xcompiler -fPIC -shared -rdc=true -o $(LIB_TARGET)
+
+# Platform-specific NVCC flags
+ifeq ($(DETECTED_OS),Windows)
+    NVCC_FLAGS = -shared -rdc=true -o $(LIB_TARGET)
+else
+    NVCC_FLAGS = -Xcompiler -fPIC -shared -rdc=true -o $(LIB_TARGET)
+endif
 
 # OpenCL detection and configuration
-ifeq ($(shell uname),Darwin)
+ifeq ($(DETECTED_OS),Windows)
+	# Windows OpenCL detection
+	CC = cl
+	OPENCL_AVAILABLE = 0
+	OPENCL_FLAGS =
+
+	# Check for CUDA OpenCL (NVIDIA)
+	ifdef CUDA_PATH
+		ifneq ($(wildcard $(CUDA_PATH)$(PATH_SEP)lib$(PATH_SEP)x64$(PATH_SEP)OpenCL.lib),)
+			OPENCL_FLAGS = /LIBPATH:"$(CUDA_PATH)$(PATH_SEP)lib$(PATH_SEP)x64" OpenCL.lib
+			OPENCL_CFLAGS_EXTRA = /I"$(CUDA_PATH)$(PATH_SEP)include"
+			OPENCL_AVAILABLE = 1
+		endif
+	endif
+
+	# Check for Intel OpenCL
+	ifdef INTELOCLSDKROOT
+		ifneq ($(wildcard $(INTELOCLSDKROOT)$(PATH_SEP)lib$(PATH_SEP)x64$(PATH_SEP)OpenCL.lib),)
+			OPENCL_FLAGS = /LIBPATH:"$(INTELOCLSDKROOT)$(PATH_SEP)lib$(PATH_SEP)x64" OpenCL.lib
+			OPENCL_CFLAGS_EXTRA = /I"$(INTELOCLSDKROOT)$(PATH_SEP)include"
+			OPENCL_AVAILABLE = 1
+		endif
+	endif
+
+	# Fallback: check standard Windows paths
+	ifeq ($(OPENCL_AVAILABLE),0)
+		ifneq ($(wildcard C:$(PATH_SEP)Windows$(PATH_SEP)System32$(PATH_SEP)OpenCL.dll),)
+			OPENCL_FLAGS = OpenCL.lib
+			OPENCL_AVAILABLE = 1
+		endif
+	endif
+
+	OPENCL_CFLAGS = /c /DDLL_EXPORTS $(OPENCL_CFLAGS_EXTRA)
+else ifeq ($(DETECTED_OS),Darwin)
 	# macOS uses OpenCL framework
 	CC = clang
 	OPENCL_FLAGS = -framework OpenCL
@@ -58,7 +138,24 @@ else
 endif
 
 # Include OpenCL headers check
-ifeq ($(shell uname),Darwin)
+ifeq ($(DETECTED_OS),Windows)
+	OPENCL_HEADERS_AVAILABLE = 0
+	# Check CUDA headers
+	ifdef CUDA_PATH
+		ifneq ($(wildcard $(CUDA_PATH)$(PATH_SEP)include$(PATH_SEP)CL$(PATH_SEP)cl.h),)
+			OPENCL_HEADERS_AVAILABLE = 1
+		endif
+	endif
+	# Check Intel OpenCL headers
+	ifdef INTELOCLSDKROOT
+		ifneq ($(wildcard $(INTELOCLSDKROOT)$(PATH_SEP)include$(PATH_SEP)CL$(PATH_SEP)cl.h),)
+			OPENCL_HEADERS_AVAILABLE = 1
+		endif
+	endif
+	ifeq ($(OPENCL_HEADERS_AVAILABLE),0)
+		OPENCL_CFLAGS_EXTRA += /I"$(SRC_DIR)"
+	endif
+else ifeq ($(DETECTED_OS),Darwin)
 	# macOS has OpenCL headers in the framework
 	OPENCL_HEADERS_AVAILABLE = 1
 else
@@ -74,7 +171,12 @@ else
 	endif
 endif
 
-OPENCL_CFLAGS = -fPIC -shared -I$(SRC_DIR) $(OPENCL_CFLAGS_EXTRA)
+# Set OpenCL compilation flags based on platform
+ifeq ($(DETECTED_OS),Windows)
+	OPENCL_CFLAGS = /c /DDLL_EXPORTS /I"$(SRC_DIR)" $(OPENCL_CFLAGS_EXTRA)
+else
+	OPENCL_CFLAGS = -fPIC -shared -I$(SRC_DIR) $(OPENCL_CFLAGS_EXTRA)
+endif
 
 # Metal compilation flags (macOS only)
 ifeq ($(shell uname),Darwin)
@@ -105,11 +207,41 @@ compile_commands.json: Makefile
 	@echo $(COMPILE_COMMANDS) > compile_commands.json
 
 $(LIB_TARGET): $(LIB_SOURCE) $(LIB_DEPENDENCIES)
-	@mkdir -p $(BUILD_DIR)
+ifeq ($(DETECTED_OS),Windows)
+	@$(MKDIR) "$(BUILD_DIR)" 2>NUL || echo Build directory ready
 	$(NVCC) $(NVCC_FLAGS) $(LIB_SOURCE)
+else
+	@$(MKDIR) $(BUILD_DIR)
+	$(NVCC) $(NVCC_FLAGS) $(LIB_SOURCE)
+endif
 
 $(OPENCL_LIB_TARGET): $(OPENCL_LIB_SOURCE) $(OPENCL_LIB_DEPENDENCIES)
-	@mkdir -p $(BUILD_DIR)
+ifeq ($(DETECTED_OS),Windows)
+	@$(MKDIR) "$(BUILD_DIR)" 2>NUL || echo Build directory ready
+	@if "$(OPENCL_AVAILABLE)" == "0" ( \
+		echo Error: OpenCL libraries not found! & \
+		echo. & \
+		echo Please install OpenCL development packages: & \
+		echo. & \
+		echo For NVIDIA GPUs: & \
+		echo   Install CUDA Toolkit which includes OpenCL & \
+		echo. & \
+		echo For Intel GPUs: & \
+		echo   Install Intel OpenCL SDK & \
+		echo. & \
+		echo After installation, run 'make clean && make opencl' & \
+		exit /b 1 \
+	)
+	@if "$(OPENCL_HEADERS_AVAILABLE)" == "0" ( \
+		echo Error: OpenCL headers not found! & \
+		echo Please install OpenCL SDK & \
+		exit /b 1 \
+	)
+	@echo Building OpenCL library...
+	@echo OpenCL flags: $(OPENCL_FLAGS)
+	$(CC) $(OPENCL_CFLAGS) /Fe:$(OPENCL_LIB_TARGET) $(OPENCL_LIB_SOURCE) /link $(OPENCL_FLAGS)
+else
+	@$(MKDIR) $(BUILD_DIR)
 	@if [ "$(OPENCL_AVAILABLE)" = "0" ]; then \
 		echo "Error: OpenCL libraries not found!"; \
 		echo ""; \
@@ -138,6 +270,7 @@ $(OPENCL_LIB_TARGET): $(OPENCL_LIB_SOURCE) $(OPENCL_LIB_DEPENDENCIES)
 	@echo "Building OpenCL library..."
 	@echo "OpenCL flags: $(OPENCL_FLAGS)"
 	$(CC) $(OPENCL_CFLAGS) -o $(OPENCL_LIB_TARGET) $(OPENCL_LIB_SOURCE) $(OPENCL_FLAGS)
+endif
 
 $(METAL_LIB_TARGET): $(METAL_LIB_SOURCE) $(METAL_LIB_DEPENDENCIES)
 	@mkdir -p $(BUILD_DIR)
@@ -156,18 +289,31 @@ opencl: $(OPENCL_LIB_TARGET)
 
 metal: $(METAL_LIB_TARGET)
 
-ifeq ($(shell uname),Darwin)
+ifeq ($(DETECTED_OS),Darwin)
 all: $(LIB_TARGET) $(OPENCL_LIB_TARGET) $(METAL_LIB_TARGET)
+else ifeq ($(DETECTED_OS),Windows)
+all: $(LIB_TARGET) $(OPENCL_LIB_TARGET)
 else
 all: $(LIB_TARGET) $(OPENCL_LIB_TARGET)
 endif
 
 check-opencl:
-	@echo "=== OpenCL Availability Check ==="
-	@echo "Platform: $(shell uname)"
-	@echo ""
-	@echo "OpenCL Libraries:"
-ifeq ($(shell uname),Darwin)
+	@echo === OpenCL Availability Check ===
+	@echo Platform: $(DETECTED_OS)
+	@echo.
+	@echo OpenCL Libraries:
+ifeq ($(DETECTED_OS),Windows)
+	@if "$(OPENCL_AVAILABLE)" == "1" ( \
+		echo   OpenCL Libraries: ✓ Found & \
+		echo   Library flags: $(OPENCL_FLAGS) \
+	) else ( \
+		echo   OpenCL Libraries: ✗ Not found & \
+		echo. & \
+		echo   Install one of: & \
+		echo     CUDA Toolkit ^(includes OpenCL^) & \
+		echo     Intel OpenCL SDK \
+	)
+else ifeq ($(DETECTED_OS),Darwin)
 	@echo "  macOS OpenCL Framework: ✓ Available"
 else
 	@if [ "$(OPENCL_AVAILABLE)" = "1" ]; then \
@@ -183,9 +329,16 @@ else
 		echo "    sudo apt install intel-opencl-icd                               # Intel"; \
 	fi
 endif
-	@echo ""
-	@echo "OpenCL Headers:"
-ifeq ($(shell uname),Darwin)
+	@echo.
+	@echo OpenCL Headers:
+ifeq ($(DETECTED_OS),Windows)
+	@if "$(OPENCL_HEADERS_AVAILABLE)" == "1" ( \
+		echo   OpenCL Headers: ✓ Found \
+	) else ( \
+		echo   OpenCL Headers: ✗ Not found & \
+		echo   Install OpenCL SDK \
+	)
+else ifeq ($(DETECTED_OS),Darwin)
 	@echo "  macOS OpenCL Headers: ✓ Available (framework)"
 else
 	@if [ "$(OPENCL_HEADERS_AVAILABLE)" = "1" ]; then \
@@ -195,17 +348,30 @@ else
 		echo "  Install with: sudo apt install opencl-headers"; \
 	fi
 endif
-	@echo ""
-	@echo "Build Status:"
+	@echo.
+	@echo Build Status:
+ifeq ($(DETECTED_OS),Windows)
+	@if "$(OPENCL_AVAILABLE)" == "1" if "$(OPENCL_HEADERS_AVAILABLE)" == "1" ( \
+		echo   OpenCL Build: ✓ Ready & \
+		echo   Run: make opencl \
+	) else ( \
+		echo   OpenCL Build: ✗ Missing dependencies \
+	)
+else
 	@if [ "$(OPENCL_AVAILABLE)" = "1" ] && [ "$(OPENCL_HEADERS_AVAILABLE)" = "1" ]; then \
 		echo "  OpenCL Build: ✓ Ready"; \
 		echo "  Run: make opencl"; \
 	else \
 		echo "  OpenCL Build: ✗ Missing dependencies"; \
 	fi
-	@echo ""
+endif
+	@echo.
+ifeq ($(DETECTED_OS),Windows)
+	@echo Optional: Check GPU with: wmic path win32_VideoController get name
+else
 	@echo "Optional: Install 'clinfo' to list OpenCL devices:"
 	@echo "  sudo apt install clinfo && clinfo"
+endif
 
 check-metal:
 	@echo "=== Metal Availability Check ==="
@@ -230,6 +396,10 @@ else
 endif
 
 clean:
-	rm -rf $(BUILD_DIR)
+ifeq ($(DETECTED_OS),Windows)
+	@if exist "$(BUILD_DIR)" $(RMDIR) "$(BUILD_DIR)" 2>NUL || echo Clean completed
+else
+	$(RM) $(BUILD_DIR)
+endif
 
 .PHONY: all cuda opencl metal clean check-opencl check-metal
